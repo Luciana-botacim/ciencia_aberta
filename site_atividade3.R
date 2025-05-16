@@ -1,0 +1,147 @@
+---
+title: "Atividade_3_site"
+author: "Luciana Botacim"
+date: "2025-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+##Atividade 3- acessar e analisar a ocorrencia da especie Rudgea coronata
+
+library(rgbif)
+library(tidyverse)
+
+# baixar ocorrencias
+```{r setup, include=TRUE}
+rudgea_gbif <- occ_data(scientificName = "Rudgea coronata", 
+                      hasCoordinate = TRUE,
+                      hasGeospatialIssue=FALSE)
+```
+
+# dimensoes
+dim(rudgea_gbif)
+
+dim(rudgea_gbif$data)
+
+# checar campos
+rudgea_gbif$data %>% names
+
+rudgea_gbif$data$municipality
+rudgea_gbif$data$locationID
+
+gbif_issues()
+?gbif_issues
+
+# checar problemas reportados
+```{r setup, include=TRUE}
+rudgea_issues_gbif <- rudgea_gbif$data$issues %>% 
+  unique() %>% 
+  strsplit(., "[,]") %>% 
+  unlist()
+
+gbif_issues() %>% 
+  data.frame() %>% 
+  filter(code %in% rudgea_issues_gbif)
+```
+
+#variáveis que serão úteis para a validação dos dados e futuras análises
+library(dplyr)
+rudgea_gbif1 <- rudgea_gbif$data %>%
+  dplyr::select(scientificName,acceptedScientificName,decimalLatitude,decimalLongitude, issues,waterBody,basisOfRecord, occurrenceStatus, rightsHolder,datasetName, recordedBy,locality, habitat)
+#depth retirado porque minha espécie é terrestre
+#foram encontrados 239 ocorrencias
+rudgea_gbif1 <- rudgea_gbif1 %>% 
+  distinct() 
+#agora foi para 225
+
+# checar niveis dos fatores
+lapply(rudgea_gbif1, unique)
+
+library(bdc)
+library(CoordinateCleaner)
+
+# checar coordenadas válidas
+check_pf <- 
+  bdc::bdc_coordinates_outOfRange(
+    data = rudgea_gbif1,
+    lat = "decimalLatitude",
+    lon = "decimalLongitude")
+
+# checar coordenadas válidas e próximas a capitais (muitas vezes as coordenadas são erroneamente associadas a capitais dos países)
+
+cl <- rudgea_gbif1 %>%
+  CoordinateCleaner::clean_coordinates(species = "acceptedScientificName",
+                                       lat = "decimalLatitude",
+                                       lon = "decimalLongitude",
+                                       tests = c("capitals", 
+                                                 "centroids","equal", 
+                                                 "gbif", "institutions", 
+                                                 "outliers", "seas", 
+                                                 "zeros"))  
+
+# verificar coordenadas com flags
+
+# capitais (padrão é um raio de 10km)
+ggplot() +
+  borders("world", fill = "lightgray") +
+  geom_point(data = cl, aes(x = decimalLongitude, y = decimalLatitude, color = `.cap`)) +
+  coord_quickmap() +
+  theme_classic()
+?borders
+
+# pontos no mar
+ggplot() +
+  borders("world", fill = "lightgray") +
+  geom_point(data = cl, aes(x = decimalLongitude, y = decimalLatitude, color = `.sea`)) +
+  coord_quickmap() +
+  theme_classic()
+
+# investigar niveis suspeitos
+rudgea_gbif1 %>% 
+  distinct(waterBody) %>% 
+  pull()
+#  "Litoral Norte"
+
+# waterBody
+rudgea_gbif1 %>%
+  group_by(waterBody) %>% 
+  summarise(occ = length(scientificName)) %>% 
+  ggplot(aes(occ, y=waterBody)) +
+  geom_bar(stat = 'identity') 
+
+rudgea_gbif1 %>% 
+  filter(waterBody %in% c("Litoral Norte")) %>% 
+  distinct(datasetName)
+
+rudgea_gbif1 <- rudgea_gbif1 %>% 
+  filter(!waterBody %in% c("Litoral Norte"))
+
+rudgea_gbif1 %>% 
+  filter(datasetName %in% c("SinBIOTA")) %>% 
+  data.frame()
+
+# filtrar todas do dataset suspeito
+rudgea_gbif_noDiveboard <- rudgea_gbif1 %>% 
+  filter(!datasetName %in% c("SinBIOTA"))
+rudgea_gbif_ok<-rudgea_gbif_noDiveboard
+
+library(ggmap)
+library(maps)
+library(mapdata)
+
+world <- map_data("world")
+?map_data
+# checar pontos
+
+ggplot() +
+  geom_polygon(data = world, aes(x = long, y = lat, group = group)) +
+  coord_fixed() +
+  theme_classic() +
+  geom_point(data = rudgea_gbif_ok, aes(x = decimalLongitude, y = decimalLatitude), color = "red") +
+  labs(x = "longitude", y = "latitude", title = expression(italic("Rudgea coronata")))+
+  lims(x = c(-100, 0), y = c(-50, 25))
